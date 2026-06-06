@@ -23,6 +23,14 @@ UPLOAD_INTERVAL_SECONDS = float(os.getenv("UPLOAD_INTERVAL_SECONDS", "3"))
 METRICS_PORT = int(os.getenv("METRICS_PORT", "8000"))
 SEED = int(os.getenv("SEED", "7"))
 
+# ---- 隨機異常注入（uploader 每次上傳擲骰，命中即對隨機租戶觸發）----
+ERROR_MULTIPLIER = float(os.getenv("ERROR_MULTIPLIER", "1.0"))
+ERROR_SCENARIOS = {
+    "poison": 0.02,       # 損毀檔案 → 向量化失敗 → DLQ
+    "duplicate": 0.03,    # 上游重送，同一檔案投遞兩次 → 冪等跳過
+    "mini_burst": 0.01,   # 單一租戶突發上傳 10-25 份中大型檔案
+}
+
 # ---- 租戶 ----
 TENANTS = ["acme", "globex", "initech", "umbrella", "stark", "wayne", "hooli", "dunder"]
 BIG_TENANT = "megacorp"          # 事故主角：一次上傳上百份大檔的大客戶

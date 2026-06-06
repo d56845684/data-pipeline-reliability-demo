@@ -150,6 +150,7 @@ services:
     environment:
       UPLOAD_INTERVAL_SECONDS: "3"
       SEED: "7"
+      ERROR_MULTIPLIER: "1.0"   # 隨機異常頻率倍數（0 = 關閉隨機注入）
     depends_on:
       rabbitmq:
         condition: service_healthy

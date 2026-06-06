@@ -243,7 +243,19 @@ docker compose exec case2-uploader python inject.py burst
 # 再看儀表板：只有 megacorp 的佇列積壓與延遲上升，其他租戶 P95 不受影響
 ```
 
-### 其他可靠性機制演示
+### 隨機異常注入（自動，隨機租戶）
+
+uploader 每次上傳擲骰，異常會隨機落在任一租戶（含 megacorp）：
+
+| 情境 | 機率/次 | 效果 |
+|------|--------|------|
+| `poison` | 2% | 損毀檔 → 向量化失敗 → DLQ（`C2DLQNotEmpty` 告警） |
+| `duplicate` | 3% | 同檔案投遞兩次 → 冪等鍵跳過，計數器可見 |
+| `mini_burst` | 1% | 隨機租戶突發上傳 10–25 份中大型檔案 |
+
+`ERROR_MULTIPLIER=0` 可關閉隨機注入（演示前清場用）。
+
+### 手動事故注入演示
 
 ```bash
 # 毒訊息 → DLQ（C2DLQNotEmpty critical 告警）→ 修復後重放（冪等保證不重複入庫）
