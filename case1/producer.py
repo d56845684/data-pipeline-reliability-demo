@@ -71,10 +71,13 @@ def produce(pipeline: str, business_date: date, rng: random.Random,
     """
     multiplier = config.ERROR_MULTIPLIER if error_multiplier is None else error_multiplier
     base = config.PIPELINES[pipeline]["base_rows"]
+    scenario = error_injector.choose_scenario(rng, multiplier, force_error)
+
     n = expected_rows(base, business_date, rng)
+    if scenario == "volume_surge":
+        n *= rng.randint(5, 10)  # 上游突發送量（如補帳/改版重送），檔案內容正常
     rows = generate_rows(pipeline, business_date, n, rng)
 
-    scenario = error_injector.choose_scenario(rng, multiplier, force_error)
     rows, header, file_mode, delay_days = error_injector.apply_scenario(rows, scenario, rng)
 
     path = landing_path(pipeline, business_date)

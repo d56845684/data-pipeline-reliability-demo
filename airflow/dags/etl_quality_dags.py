@@ -130,7 +130,18 @@ def build_dag(pipeline: str):
                     etl_job.run(conn, pipeline, d, None)
                 d += timedelta(days=1)
 
-        process_file.expand(business_date=scan_new_files()) >> detect_missing()
+        @task(trigger_rule="one_failed")
+        def mark_run_failed() -> None:
+            """哨兵 task：任一檔案處理失敗時讓 DAG run 轉 failed。
+
+            detect_missing 用 all_done（缺檔偵測必須跑）會讓 DAG run 顯示
+            success，失敗訊號只剩 task 層級——此哨兵把它拉回 run 層級。
+            """
+            raise AirflowException("至少一個檔案 blocking 檢核失敗，見紅色 process_file task")
+
+        mapped = process_file.expand(business_date=scan_new_files())
+        mapped >> detect_missing()
+        mapped >> mark_run_failed()
 
     return etl_pipeline_dag()
 

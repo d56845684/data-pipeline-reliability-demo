@@ -43,6 +43,14 @@ groups:
           summary: "空值率異常：{{ $labels.pipeline }} / {{ $labels.column }}"
           description: "關鍵欄位 {{ $labels.column }} 空值率 {{ $value | humanizePercentage }} 超過 10% 閾值"
 
+      - alert: ETLDurationDegraded
+        expr: etl_duration_ratio > 1.10
+        labels:
+          severity: warning
+        annotations:
+          summary: "執行時間劣化：{{ $labels.pipeline }}"
+          description: "本次執行時間為過往 N 次成功執行平均的 {{ $value | printf \"%.2f\" }} 倍（>110%），可能為資料量暴增或資源爭用（沒失敗但變慢的隱性劣化）"
+
       - alert: ETLFreshnessLag
         expr: etl_freshness_days > 2
         labels:

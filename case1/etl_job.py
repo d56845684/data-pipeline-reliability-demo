@@ -85,6 +85,17 @@ def run(conn, pipeline: str, business_date: date, path: Path | None,
                 status = STATUS_WARNING if report.warning_failed else STATUS_OK
 
     duration = time.time() - start
+
+    # 執行時間劣化偵測（只對有實際處理的 run 評估，> 過往 N 次平均 +10% 即告警）
+    duration_ratio = 1.0
+    if status in (STATUS_OK, STATUS_WARNING):
+        dur_check = qc.check_duration_baseline(
+            duration, db.get_duration_history(conn, pipeline))
+        report.warning.append(dur_check)
+        duration_ratio = dur_check.value
+        if not dur_check.passed:
+            status = STATUS_WARNING
+
     db.record_run(conn, pipeline, business_date, status, rows_loaded, duration,
                   zscore, scenario,
                   [{"name": c.name, "severity": c.severity, "passed": c.passed,
@@ -98,6 +109,7 @@ def run(conn, pipeline: str, business_date: date, path: Path | None,
         rows_source=len(rows),
         rows_loaded=rows_loaded,
         duration_s=duration,
+        duration_ratio=duration_ratio,
         freshness_days=freshness,
         zscore=zscore,
         null_ratios=null_ratios,

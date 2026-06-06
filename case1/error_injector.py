@@ -83,4 +83,8 @@ def apply_scenario(rows: list[dict], scenario: str | None, rng: random.Random):
     if scenario == "corrupt_file":
         return rows, header, FILE_CORRUPT, 0
 
+    if scenario == "volume_surge":
+        # 量已在 producer 端放大（5-10 倍），檔案內容本身正常
+        return rows, header, FILE_NORMAL, 0
+
     raise ValueError(f"unhandled scenario: {scenario}")

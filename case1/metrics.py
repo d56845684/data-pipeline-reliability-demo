@@ -21,6 +21,7 @@ def push_run_metrics(
     rows_source: int,
     rows_loaded: int,
     duration_s: float,
+    duration_ratio: float,
     freshness_days: float,
     zscore: float,
     null_ratios: dict[str, float],
@@ -38,6 +39,8 @@ def push_run_metrics(
     rows_g.labels("loaded").set(rows_loaded)
 
     Gauge("etl_duration_seconds", "job duration", registry=registry).set(duration_s)
+    Gauge("etl_duration_ratio", "duration vs avg of last N successful runs",
+          registry=registry).set(duration_ratio)
     Gauge("etl_freshness_days", "business date lag of newest event", registry=registry).set(freshness_days)
     Gauge("etl_rowcount_zscore", "row count z-score vs same-daytype baseline", registry=registry).set(zscore)
 

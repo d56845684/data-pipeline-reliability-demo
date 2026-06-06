@@ -8,6 +8,7 @@ import re
 import statistics
 from dataclasses import dataclass, field
 
+import config
 from config import EXPECTED_COLUMNS
 
 ENC_PATTERN = re.compile(r"^ENC\$[0-9a-f]{16}$")
@@ -105,6 +106,27 @@ def check_rowcount_baseline(current: int, history: list[int]) -> CheckResult:
     return CheckResult("rowcount_baseline", "warning", abs(z) <= ZSCORE_THRESHOLD,
                        z, ZSCORE_THRESHOLD,
                        f"z={z:+.1f} vs 同期基線" if abs(z) > ZSCORE_THRESHOLD else "")
+
+
+def check_duration_baseline(duration_s: float, history: list[float]) -> CheckResult:
+    """執行時間劣化偵測：超過過往 N 次成功執行平均的 +10% 即告警。
+
+    value 為「本次 / 歷史平均」的比值（1.0 = 與平均相同）。
+    低於 DURATION_MIN_SECONDS 的小 job 不告警（避免秒級以下的噪聲誤報）。
+    """
+    if len(history) < MIN_BASELINE_RUNS:
+        return CheckResult("duration_baseline", "warning", True, 1.0,
+                           config.DURATION_RATIO_THRESHOLD, "baseline warming up")
+    avg = statistics.fmean(history)
+    if avg <= 0:
+        return CheckResult("duration_baseline", "warning", True, 1.0,
+                           config.DURATION_RATIO_THRESHOLD)
+    ratio = duration_s / avg
+    passed = ratio <= config.DURATION_RATIO_THRESHOLD or duration_s < config.DURATION_MIN_SECONDS
+    return CheckResult("duration_baseline", "warning", passed, ratio,
+                       config.DURATION_RATIO_THRESHOLD,
+                       "" if passed else
+                       f"本次 {duration_s:.2f}s 為過往 {len(history)} 次平均（{avg:.2f}s）的 {ratio:.2f} 倍")
 
 
 def run_checks(header: list[str], rows: list[dict], history: list[int]) -> QualityReport:

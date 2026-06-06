@@ -72,6 +72,21 @@ def get_same_daytype_history(conn, pipeline: str, business_date: date, limit: in
         return [r[0] for r in cur.fetchall()]
 
 
+def get_duration_history(conn, pipeline: str, limit: int | None = None) -> list[float]:
+    """取過往 N 次成功執行的時長，供執行時間劣化偵測使用。"""
+    limit = limit or config.DURATION_BASELINE_RUNS
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT duration_s FROM etl_run_stats
+            WHERE pipeline = %s AND status IN (0, 1)
+            ORDER BY business_date DESC LIMIT %s
+            """,
+            (pipeline, limit),
+        )
+        return [float(r[0]) for r in cur.fetchall()]
+
+
 def get_last_success_epoch(conn, pipeline: str) -> float | None:
     with conn.cursor() as cur:
         cur.execute(

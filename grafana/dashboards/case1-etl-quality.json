@@ -154,17 +154,30 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "ETL 執行時長",
+      "title": "ETL 執行時長 vs 基線比值（>1.1 告警）",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "etl_duration_seconds", "legendFormat": "{{pipeline}}", "refId": "A" }
+        { "expr": "etl_duration_ratio", "legendFormat": "{{pipeline}}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "showPoints": "never" },
-          "unit": "s",
-          "min": 0
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1.1 }
+            ]
+          }
         },
         "overrides": []
       },

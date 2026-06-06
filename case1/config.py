@@ -19,7 +19,13 @@ ERROR_SCENARIOS = {
     "encryption_leak": 0.04,   # 暗碼欄位混入明碼（合規最高風險）
     "late_arrival": 0.05,      # 檔案晚到 1-2 個營業日
     "corrupt_file": 0.03,      # 檔案損毀無法解析
+    "volume_surge": 0.03,      # 資料量暴增 5-10 倍（觸發筆數基線 + 執行時間劣化告警）
 }
+
+# ---- 執行時間劣化偵測（> 過往 N 次平均的 +10% 即告警）----
+DURATION_BASELINE_RUNS = int(os.getenv("DURATION_BASELINE_RUNS", "20"))      # 取過往 N 次成功執行
+DURATION_RATIO_THRESHOLD = float(os.getenv("DURATION_RATIO_THRESHOLD", "1.10"))  # 平均的 1.10 倍
+DURATION_MIN_SECONDS = float(os.getenv("DURATION_MIN_SECONDS", "0.2"))       # 低於此絕對值不告警（小 job 噪聲）
 
 # ---- 外部服務 ----
 DATA_DIR = os.getenv("DATA_DIR", "/data/landing")
