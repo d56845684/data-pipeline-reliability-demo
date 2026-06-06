@@ -1,0 +1,60 @@
+groups:
+  - name: case1-etl-reliability
+    rules:
+      # ---- Critical：中斷性故障 ----
+      - alert: ETLJobFailed
+        expr: etl_job_status == 2
+        labels:
+          severity: critical
+        annotations:
+          summary: "ETL 失敗：{{ $labels.pipeline }}"
+          description: "管道 {{ $labels.pipeline }}（{{ $labels.criticality }}）blocking 檢核失敗或檔案損毀，已中斷載入"
+
+      - alert: ETLBlockingCheckFailed
+        expr: etl_check_failed{severity="blocking"} == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blocking 檢核失敗：{{ $labels.pipeline }} / {{ $labels.check }}"
+          description: "{{ $labels.check }} 檢核未通過（暗碼洩漏/主鍵重複/schema 變更屬最高風險）"
+
+      # ---- Warning：品質與時效劣化 ----
+      - alert: ETLFileMissing
+        expr: etl_job_status == 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "來源檔案缺失：{{ $labels.pipeline }}"
+          description: "管道 {{ $labels.pipeline }} 當日檔案未到（可能上游延遲），請依 runbook 確認來源系統"
+
+      - alert: ETLRowCountAnomaly
+        expr: abs(etl_rowcount_zscore) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "筆數偏離同期基線：{{ $labels.pipeline }}"
+          description: "z-score = {{ $value | printf \"%.1f\" }}，疑似上游靜默少送/多送資料"
+
+      - alert: ETLNullRatioHigh
+        expr: etl_null_ratio > 0.10
+        labels:
+          severity: warning
+        annotations:
+          summary: "空值率異常：{{ $labels.pipeline }} / {{ $labels.column }}"
+          description: "關鍵欄位 {{ $labels.column }} 空值率 {{ $value | humanizePercentage }} 超過 10% 閾值"
+
+      - alert: ETLFreshnessLag
+        expr: etl_freshness_days > 2
+        labels:
+          severity: warning
+        annotations:
+          summary: "資料時效落後：{{ $labels.pipeline }}"
+          description: "最新事件日期落後營業日 {{ $value }} 天"
+
+      - alert: ETLPipelineStale
+        expr: time() - etl_last_success_timestamp > 90
+        labels:
+          severity: critical
+        annotations:
+          summary: "管道停擺：{{ $labels.pipeline }}"
+          description: "已超過 90 秒（約 6 個模擬日）沒有成功的 ETL 執行"
