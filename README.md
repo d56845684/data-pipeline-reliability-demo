@@ -8,6 +8,8 @@
 
 ## Case 1 — 批次 ETL 資料品質與延遲監控體系
 
+> 📐 詳細架構圖與設計說明：[case1/README.md](case1/README.md)
+
 模擬保險數據湖場景：8 條每日批次管道（保單/理賠/收付…），**data producer 隨機注入
 七種典型異常**，ETL 框架以兩級品質檢核攔截，指標經 Pushgateway 進 Prometheus，
 Grafana 視覺化 + Alertmanager 告警分級路由。
@@ -200,6 +202,8 @@ docker compose exec producer python inject.py encryption_leak policies
 - airflow：DAG `schedule=timedelta(minutes=1)`（`airflow/dags/etl_quality_dags.py`）
 
 ## Case 2 — 多租戶佇列檔案處理（RabbitMQ + LLM embedding）
+
+> 📐 詳細架構圖與設計說明：[case2/README.md](case2/README.md)
 
 重現 SaaS 平台的「大客戶突發上傳拖垮全體租戶」事故，以及修復後的架構對比。
 
