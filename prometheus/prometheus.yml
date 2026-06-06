@@ -27,7 +27,7 @@ scrape_configs:
   # case2 workers 以 DNS A 紀錄探索，支援 --scale 水平擴容後自動納入抓取
   - job_name: case2-workers
     dns_sd_configs:
-      - names: ["case2-uploader", "case2-preprocess", "case2-vector"]
+      - names: ["case2-uploader", "case2-preprocess", "case2-vector", "case2-dlq-sentinel"]
         type: A
         port: 8000
         refresh_interval: 15s

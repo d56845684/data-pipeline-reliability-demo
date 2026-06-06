@@ -89,11 +89,12 @@ groups:
 
       - alert: C2DLQNotEmpty
         expr: rabbitmq_queue_messages{queue="c2.vector.dlq"} > 0
+        for: 2m   # 留時間給 DLQ 哨兵自動分流（transient 重放/schema 隔離），剩下的才是真需要人的
         labels:
           severity: critical
         annotations:
-          summary: "DLQ 有未處置訊息"
-          description: "{{ $value }} 則訊息處理失敗進入 DLQ，需人工檢視後以 replay_dlq.py 重放"
+          summary: "DLQ 有待人工處置的訊息"
+          description: "{{ $value }} 則訊息哨兵無法自動處置（poison 或重放額度用盡），依 RB-04 以 dlq_tool.py 處理"
 
       - alert: C2TenantLatencyHigh
         expr: histogram_quantile(0.95, sum by (le, tenant) (rate(c2_chunk_e2e_seconds_bucket[5m]))) > 60

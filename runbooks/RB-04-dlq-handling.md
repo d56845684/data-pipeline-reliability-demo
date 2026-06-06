@@ -6,6 +6,26 @@
 > 訊息進 DLQ 代表「自動重試救不回來，需要人做決策」——目標是在 SLA 內
 > 把 DLQ 清空：能修的修完重放，不能修的隔離存證後通知上游。
 
+## 0. 自動分流層（DLQ 哨兵，先於人工）
+
+`case2-dlq-sentinel` 服務每 30 秒巡檢 DLQ 並自動處置：
+
+- `transient_or_unknown` → **自動重放**（每則上限 2 次，`dlq_replays` 計數防循環）
+- `schema_incompatible` → **自動隔離**入 `c2_dlq_quarantine`
+- `poison_content` → **自動隔離**入 `c2_dlq_quarantine`（處置機械性：存證 → 通知租戶重傳；
+  人工作業移到隔離表彙整，不佔 DLQ）
+- 重放額度用盡的未知故障 → **留在 DLQ 等人工 debug**（即本 runbook 的處理對象）
+
+因此 `C2DLQNotEmpty` 告警觸發（延遲 2 分鐘，讓哨兵先跑）時，佇列裡剩下的
+**都是機器處理不了、真正需要人做決策的訊息**。日常的人工作業重心在隔離表：
+
+```sql
+-- 每日彙整：哪些租戶該收到「重新上傳」通知
+SELECT tenant, count(*) FROM c2_dlq_quarantine
+WHERE reason = 'poison_content' AND quarantined_at > now() - interval '1 day'
+GROUP BY tenant;
+```
+
 ## 1. 檢視與分類（15 分鐘內）
 
 ```bash

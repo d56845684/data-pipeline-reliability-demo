@@ -164,6 +164,20 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # DLQ 哨兵：自動分流（transient 重放 / schema 不相容隔離），人工項才留 DLQ
+  case2-dlq-sentinel:
+    build: ./case2
+    command: ["python", "dlq_sentinel.py"]
+    environment:
+      SENTINEL_INTERVAL_SECONDS: "30"
+      DLQ_MAX_AUTO_REPLAYS: "2"
+      PER_TENANT_QUEUES: ${PER_TENANT_QUEUES:-false}   # 重放目標需與 worker 模式一致
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
   case2-vector:
     build: ./case2
     command: ["python", "vector_worker.py"]
