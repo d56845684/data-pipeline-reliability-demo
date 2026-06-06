@@ -130,6 +130,54 @@ services:
       pushgateway:
         condition: service_started
 
+  # ================= Case 2：多租戶佇列檔案處理 =================
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "15672:15672"   # management UI（guest/guest）
+    volumes:
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-demo.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  case2-uploader:
+    build: ./case2
+    command: ["python", "uploader.py"]
+    environment:
+      UPLOAD_INTERVAL_SECONDS: "3"
+      SEED: "7"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  case2-preprocess:
+    build: ./case2
+    command: ["python", "preprocess_worker.py"]
+    environment:
+      PER_TENANT_QUEUES: ${PER_TENANT_QUEUES:-false}   # false = 事故架構（共用佇列）
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  case2-vector:
+    build: ./case2
+    command: ["python", "vector_worker.py"]
+    environment:
+      PER_TENANT_QUEUES: ${PER_TENANT_QUEUES:-false}
+      BATCH_WRITES: ${BATCH_WRITES:-true}     # true = 批次 embedding + batch upsert（修復後）
+      EMBED_BASE_MS: "30"                     # 每次推論呼叫的固定 overhead
+      EMBED_MS_PER_TOKEN: "0.05"
+      EMBED_DIM: "384"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   landing:

@@ -196,9 +196,76 @@ docker compose exec producer python inject.py encryption_leak policies
   `ERROR_MULTIPLIER`（錯誤頻率倍數，0 = 全健康；2.0 = 高頻事故）、`SEED`（可重現）
 - airflow：DAG `schedule=timedelta(minutes=1)`（`airflow/dags/etl_quality_dags.py`）
 
-## Case 2 — 多租戶佇列檔案處理（規劃中）
+## Case 2 — 多租戶佇列檔案處理（RabbitMQ + LLM embedding）
 
-RabbitMQ + 多租戶 worker + DLQ + 冪等處理，重現「大客戶突發上傳拖垮全體」事故與修復。
+重現 SaaS 平台的「大客戶突發上傳拖垮全體租戶」事故，以及修復後的架構對比。
+
+```
+8 個一般租戶（每 3s 上傳小檔）─┐
+megacorp（burst：100 份大檔）──┤
+                              ▼
+                        c2.upload 佇列
+                              │ preprocess worker（切割：1 檔 → 5-80 chunks，含文字內容）
+                              ▼
+              ┌─ 共用佇列 c2.vector.shared（PER_TENANT_QUEUES=false，事故架構）
+              └─ 租戶隔離 c2.vector.<tenant> ×9（=true，修復後）
+                              │ vector worker：批次 LLM embedding 推論
+                              │（耗時 = 30ms overhead + 0.05ms/token，偶發 timeout 自動重試）
+                              ▼
+                  PostgreSQL c2_chunks（冪等 batch upsert，含 384 維向量）
+                              │ 毒訊息 → DLX → c2.vector.dlq（人工檢視後 replay）
+```
+
+| 服務 | URL |
+|------|-----|
+| Grafana — Case 2 儀表板 | http://localhost:3000/d/case2-queue |
+| RabbitMQ Management | http://localhost:15672（guest/guest） |
+
+### 事故重現（noisy neighbor）
+
+```bash
+# 預設為「事故架構」（共用單一佇列）。注入大客戶突發上傳：
+docker compose exec case2-uploader python inject.py burst        # megacorp 100 份大檔 → ~6000 chunks
+
+# 觀察 Grafana case2 儀表板：佇列深度飆升、所有租戶 P95 同步惡化、
+# C2VectorBacklogHigh / C2TenantLatencyHigh 告警 FIRING
+```
+
+### 修復後對比（租戶隔離佇列）
+
+```bash
+PER_TENANT_QUEUES=true docker compose up -d case2-preprocess case2-vector
+docker compose exec case2-uploader python inject.py burst
+
+# 再看儀表板：只有 megacorp 的佇列積壓與延遲上升，其他租戶 P95 不受影響
+```
+
+### 其他可靠性機制演示
+
+```bash
+# 毒訊息 → DLQ（C2DLQNotEmpty critical 告警）→ 修復後重放（冪等保證不重複入庫）
+docker compose exec case2-uploader python inject.py poison
+docker compose exec case2-vector   python replay_dlq.py
+
+# 上游重複投遞 → 冪等鍵跳過（儀表板「冪等跳過」計數 +N）
+docker compose exec case2-uploader python inject.py duplicate
+
+# 容量不足時水平擴容 worker（Prometheus 以 DNS 自動發現新 replica）
+docker compose up -d --scale case2-vector=4
+
+# 修復前的 DB 寫入方式對比（逐 chunk 推論 + 逐筆 INSERT，吞吐約降為 1/3）
+BATCH_WRITES=false docker compose up -d case2-vector
+```
+
+### 設計對應（STAR Case 2 ↔ demo 實作）
+
+| STAR 中的修復項 | demo 實作 |
+|----------------|-----------|
+| 租戶公平性（佇列拆分 + 輪詢） | `PER_TENANT_QUEUES` 切換，prefetch 小值公平消化 |
+| 冪等處理 + DLQ + 重放 | PK `(file_id, chunk_idx)` + `ON CONFLICT DO NOTHING`、DLX、`replay_dlq.py` |
+| 批次寫入調校 | 批次 embedding（攤平推論 overhead）+ `execute_values` batch upsert |
+| 佇列深度告警與監控 | rabbitmq_prometheus per-queue 指標 + 租戶級 P95 histogram |
+| 彈性伸縮 | `--scale case2-vector=N` + Prometheus DNS 服務發現 |
 
 ```bash
 docker compose down -v   # 全部清掉重來

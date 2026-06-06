@@ -67,6 +67,43 @@ groups:
           summary: "管道停擺：{{ $labels.pipeline }}"
           description: "已超過 90 秒（約 6 個模擬日）沒有成功的 ETL 執行"
 
+  - name: case2-queue-pipeline
+    rules:
+      - alert: C2VectorBacklogHigh
+        expr: sum(rabbitmq_queue_messages{queue=~"c2\\.vector\\..*", queue!="c2.vector.dlq"}) > 1000
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "向量化佇列積壓"
+          description: "待處理 chunk 任務 {{ $value }} 則，可能有租戶突發上傳，檢查各租戶流入量"
+
+      - alert: C2VectorBacklogCritical
+        expr: sum(rabbitmq_queue_messages{queue=~"c2\\.vector\\..*", queue!="c2.vector.dlq"}) > 4000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "向量化佇列嚴重積壓"
+          description: "待處理 {{ $value }} 則且持續 1 分鐘，所有租戶處理延遲惡化中，依 runbook 擴容 worker"
+
+      - alert: C2DLQNotEmpty
+        expr: rabbitmq_queue_messages{queue="c2.vector.dlq"} > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "DLQ 有未處置訊息"
+          description: "{{ $value }} 則訊息處理失敗進入 DLQ，需人工檢視後以 replay_dlq.py 重放"
+
+      - alert: C2TenantLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, tenant) (rate(c2_chunk_e2e_seconds_bucket[5m]))) > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "租戶處理延遲劣化：{{ $labels.tenant }}"
+          description: "{{ $labels.tenant }} 上傳→入庫 P95 超過 60 秒（noisy neighbor 或容量不足）"
+
   - name: case1-db-health
     rules:
       - alert: PostgresDown
