@@ -1,17 +1,22 @@
 route:
-  receiver: dataops-webhook
+  receiver: console-log            # 預設：所有告警只進 console（docker compose logs -f alert-logger）
   group_by: ["alertname", "pipeline"]
   group_wait: 5s
   group_interval: 30s
   repeat_interval: 5m
   routes:
-    # critical 立即送出，模擬 PagerDuty 即時呼叫值班
-    - receiver: dataops-webhook
+    # critical 才推播 LINE（模擬 PagerDuty 即時呼叫值班）；warning 留在 console/Grafana
+    - receiver: line-pager
       matchers: ['severity="critical"']
       group_wait: 0s
 
 receivers:
-  - name: dataops-webhook
+  - name: console-log
     webhook_configs:
       - url: http://alert-logger:5001/alerts
+        send_resolved: true
+
+  - name: line-pager
+    webhook_configs:
+      - url: http://alert-logger:5001/alerts?push=line
         send_resolved: true

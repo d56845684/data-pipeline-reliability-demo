@@ -113,6 +113,62 @@ docker compose exec postgres psql -U etl -d warehouse \
 | 告警分級路由 | Alertmanager critical 即時 / warning 聚合 |
 | 冪等回補 | `ON CONFLICT DO UPDATE` + late_arrival 自動補跑 |
 
+### LINE 告警推播設定（選用）
+
+告警預設輸出至 console（`docker compose logs -f alert-logger`）。要推播到 LINE，
+採 **Messaging API**（LINE Notify 已於 2025/03 終止服務）：
+
+**1. 建立 LINE channel 並取得憑證**
+
+- 到 [LINE Developers Console](https://developers.line.biz/console/) 建立 Provider →
+  建立 **Messaging API** channel（會同時產生一個官方帳號 bot）
+- `Messaging API` 頁籤 → 發行 **Channel access token (long-lived)**
+- `Basic settings` 頁籤 → 複製 **Channel secret**
+
+**2. 設定環境變數**
+
+```bash
+cp .env.example .env
+# 填入 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_CHANNEL_SECRET
+docker compose up -d --build alert-logger
+```
+
+**3. 用 Cloudflare Tunnel 開通 webhook（取得你的 userId）**
+
+LINE 平台需要一個公開的 HTTPS 端點才能回呼。腳本用 Cloudflare Quick Tunnel
+（免帳號）把本機 alert-logger 暴露出去：
+
+```bash
+./scripts/line-webhook-url.sh
+# 輸出形如 https://xxxx.trycloudflare.com/line/webhook
+```
+
+把這個 URL 貼到 LINE Console 的 **Webhook settings** → Verify → 開啟 Use webhook。
+
+**4. 取得推播目標 ID 並完成設定**
+
+用 LINE 掃 channel 的 QR code 加 bot 好友，傳任意訊息——bot 會直接回覆你的
+**userId**。填入 `.env` 的 `LINE_TARGET_ID` 後重啟：
+
+```bash
+docker compose up -d --build alert-logger
+```
+
+**5. 測試**
+
+```bash
+docker compose exec producer python inject.py encryption_leak policies
+# 約 20 秒內 LINE 收到 🔴 FIRING ETLBlockingCheckFailed 推播
+```
+
+> **推播範圍**：由 Alertmanager 路由層控制，只有 `severity=critical` 的告警
+>（ETL 失敗、blocking 檢核失敗、管道停擺）會推播 LINE；warning 級（筆數偏離、
+> 空值率、時效落後）只進 console 與 Grafana——避免 alert fatigue。
+> 免費方案每月 500 則推播；預設只推 FIRING 不推 RESOLVED，
+> `repeat_interval` 也已設 5m 防止重複轟炸。
+> Quick Tunnel 網址每次重啟會變，需重新貼到 LINE Console；
+> 長期使用建議改 named tunnel（需 Cloudflare 帳號）。
+
 ### 調整參數
 
 `docker-compose.yml` 環境變數：

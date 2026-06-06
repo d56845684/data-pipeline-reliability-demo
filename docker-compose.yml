@@ -48,6 +48,19 @@ services:
     build: ./alert_logger
     ports:
       - "15001:5001"
+    environment:
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
+      LINE_TARGET_ID: ${LINE_TARGET_ID:-}
+      LINE_SEND_RESOLVED: ${LINE_SEND_RESOLVED:-false}
+
+  # LINE webhook 對外通道（僅設定 LINE 時需要）：docker compose --profile line up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["line"]
+    command: tunnel --no-autoupdate --url http://alert-logger:5001
+    depends_on:
+      - alert-logger
 
   grafana:
     image: grafana/grafana:11.1.0
