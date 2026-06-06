@@ -1,9 +1,10 @@
 """全域設定 — 可由環境變數覆寫。"""
 import os
 
-# ---- 模擬節奏 ----
-TICK_SECONDS = float(os.getenv("TICK_SECONDS", "15"))   # 每 N 秒 = 模擬一個營業日
-WARMUP_DAYS = int(os.getenv("WARMUP_DAYS", "14"))       # 開場先快速跑 N 天無錯誤資料，建立動態基線
+# ---- 節奏 ----
+PRODUCE_INTERVAL_SECONDS = float(os.getenv("PRODUCE_INTERVAL_SECONDS", "15"))  # producer 每 N 秒落檔一個營業日
+ETL_SCAN_SECONDS = float(os.getenv("ETL_SCAN_SECONDS", "3"))                   # ETL 掃描落地區的頻率
+WARMUP_DAYS = int(os.getenv("WARMUP_DAYS", "14"))       # 落地區為空時先快速產生 N 天無錯誤資料，建立動態基線
 SEED = int(os.getenv("SEED", "42"))
 START_DATE = os.getenv("START_DATE", "2026-01-01")
 

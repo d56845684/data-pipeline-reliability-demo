@@ -63,18 +63,29 @@ services:
     depends_on:
       - prometheus
 
-  # ---------- 模擬層（producer + ETL）----------
-  simulator:
+  # ---------- 上游模擬：固定節奏持續落檔的 producer ----------
+  producer:
     build: ./case1
+    command: ["python", "producer_service.py"]
     environment:
-      TICK_SECONDS: "15"        # 每 15 秒模擬一個營業日
-      WARMUP_DAYS: "14"         # 開場快速建立動態基線
-      ERROR_MULTIPLIER: "1.0"   # 調高可增加錯誤頻率（如 2.0）
+      PRODUCE_INTERVAL_SECONDS: "15"  # 每 15 秒落檔一個營業日
+      WARMUP_DAYS: "14"               # 落地區為空時快速建立基線資料
+      ERROR_MULTIPLIER: "1.0"         # 調高可增加錯誤頻率（如 2.0）
       SEED: "42"
+      DATA_DIR: /data/landing
+      FORCE_FILE: /data/force_error.json
+    volumes:
+      - landing:/data
+
+  # ---------- ETL：掃描落地區、品質檢核、載入、上報 ----------
+  etl:
+    build: ./case1
+    command: ["python", "etl_service.py"]
+    environment:
+      ETL_SCAN_SECONDS: "3"
       PUSHGATEWAY_URL: pushgateway:9091
       PG_DSN: postgresql://etl:etl@postgres:5432/warehouse
       DATA_DIR: /data/landing
-      FORCE_FILE: /data/force_error.json
     volumes:
       - landing:/data
     depends_on:

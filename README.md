@@ -9,21 +9,26 @@
 七種典型異常**，ETL 框架以兩級品質檢核攔截，指標經 Pushgateway 進 Prometheus，
 Grafana 視覺化 + Alertmanager 告警分級路由。
 
+producer 與 ETL 為**完全解耦的兩個常駐服務**（透過落地區檔案介面溝通，貼近真實批次架構）：
+producer 以固定節奏（15 秒 = 1 個營業日）持續落檔；ETL 每 3 秒掃描落地區，
+自動處理新檔、偵測缺檔、回補遲到檔案。
+
 ```
-┌──────────┐  CSV   ┌─────────┐ quality checks ┌────────────┐
-│ producer  │ ─────► │ ETL job │ ─────────────► │ PostgreSQL │ (冪等 upsert)
-│ (錯誤注入) │ 落地檔  │         │                │ (warehouse) │
-└──────────┘        └────┬────┘                └────────────┘
-                          │ push metrics
-                          ▼
-                   ┌─────────────┐    ┌────────────┐    ┌─────────┐
-                   │ Pushgateway │ ─► │ Prometheus │ ─► │ Grafana │
-                   └─────────────┘    │ (告警規則)   │    └─────────┘
-                                      └─────┬──────┘
-                                            ▼
-                                     ┌──────────────┐   ┌──────────────┐
-                                     │ Alertmanager │ ─►│ alert-logger │ (模擬 Slack/PagerDuty)
-                                     └──────────────┘   └──────────────┘
+┌────────────┐ atomic CSV ┌──────────────┐ quality checks ┌────────────┐
+│  producer  │ ─────────► │ ETL service  │ ─────────────► │ PostgreSQL │ (冪等 upsert)
+│ (固定節奏    │  落地區     │ (掃描/檢核/   │                │ (warehouse) │
+│  +錯誤注入)  │            │  缺檔偵測/回補)│                └────────────┘
+└────────────┘            └──────┬───────┘
+                                 │ push metrics
+                                 ▼
+                          ┌─────────────┐    ┌────────────┐    ┌─────────┐
+                          │ Pushgateway │ ─► │ Prometheus │ ─► │ Grafana │
+                          └─────────────┘    │ (告警規則)   │    └─────────┘
+                                             └─────┬──────┘
+                                                   ▼
+                                            ┌──────────────┐   ┌──────────────┐
+                                            │ Alertmanager │ ─►│ alert-logger │ (模擬 Slack/PagerDuty)
+                                            └──────────────┘   └──────────────┘
 ```
 
 ### 快速開始
@@ -34,8 +39,9 @@ cd data-pipeline-reliability-demo
 docker compose up -d --build
 ```
 
-啟動後模擬器先快速跑 14 個「乾淨營業日」建立動態基線，之後每 **15 秒 = 1 個營業日**，
-每天每條管道有機率被隨機注入錯誤。
+首次啟動時 producer 先快速產生 14 個「乾淨營業日」建立動態基線，之後以固定節奏
+每 **15 秒落檔 1 個營業日**，每天每條管道有機率被隨機注入錯誤。
+（重啟不會重置日曆——producer 會從落地區既有檔案的最新日期接續）
 
 | 服務 | URL |
 |------|-----|
@@ -45,7 +51,8 @@ docker compose up -d --build
 | Pushgateway（原始指標） | http://localhost:19091 |
 
 ```bash
-docker compose logs -f simulator      # 看每日 ETL 執行結果
+docker compose logs -f producer       # 看上游落檔與錯誤注入
+docker compose logs -f etl            # 看每日 ETL 執行結果
 docker compose logs -f alert-logger   # 看告警流（模擬 Slack/PagerDuty 通知）
 ```
 
@@ -67,11 +74,11 @@ Warning 失敗 → 照常載入 + warning 告警追蹤。
 ### 現場演示：手動觸發事故
 
 ```bash
-# 對 policies 管道注入「明碼洩漏」（下一個模擬日生效）
-docker compose exec simulator python inject.py encryption_leak policies
+# 對 policies 管道注入「明碼洩漏」（下一個營業日生效）
+docker compose exec producer python inject.py encryption_leak policies
 
 # 對所有管道注入「靜默掉量」
-docker compose exec simulator python inject.py row_drop "*"
+docker compose exec producer python inject.py row_drop "*"
 
 # 可用情境：row_drop / null_spike / schema_drift / duplicate_pk /
 #          encryption_leak / late_arrival / corrupt_file
@@ -80,11 +87,11 @@ docker compose exec simulator python inject.py row_drop "*"
 注入後 15 秒內可在 Grafana 狀態矩陣看到變色、Prometheus Alerts 轉 FIRING、
 alert-logger 印出通知。
 
-### 也可單獨執行 producer / ETL（不經模擬器）
+### 也可單次手動執行 producer / ETL
 
 ```bash
-docker compose exec simulator python producer.py --pipeline claims --date 2026-03-01 --force-error duplicate_pk
-docker compose exec simulator python etl_job.py  --pipeline claims --date 2026-03-01
+docker compose exec producer python producer.py --pipeline claims --date 2026-03-01 --force-error duplicate_pk
+docker compose exec etl      python etl_job.py  --pipeline claims --date 2026-03-01
 ```
 
 ### 查倉儲與執行歷史（PostgreSQL）
@@ -108,11 +115,11 @@ docker compose exec postgres psql -U etl -d warehouse \
 
 ### 調整參數
 
-`docker-compose.yml` 的 simulator 環境變數：
+`docker-compose.yml` 環境變數：
 
-- `TICK_SECONDS`：模擬一天的真實秒數（演示時可調 5 秒加快）
-- `ERROR_MULTIPLIER`：錯誤頻率倍數（0 = 全健康；2.0 = 高頻事故）
-- `SEED`：固定隨機種子，演示可重現
+- producer：`PRODUCE_INTERVAL_SECONDS`（落檔節奏，演示可調 5 秒加快）、
+  `ERROR_MULTIPLIER`（錯誤頻率倍數，0 = 全健康；2.0 = 高頻事故）、`SEED`（可重現）
+- etl：`ETL_SCAN_SECONDS`（落地區掃描頻率）
 
 ## Case 2 — 多租戶佇列檔案處理（規劃中）
 

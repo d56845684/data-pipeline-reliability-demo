@@ -42,17 +42,20 @@ def generate_rows(pipeline: str, business_date: date, n: int, rng: random.Random
 
 
 def write_file(path: Path, rows: list[dict], header: list[str], file_mode: str) -> None:
+    """先寫 temp 再 atomic rename，避免下游掃描器讀到寫一半的檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".csv.tmp")
     if file_mode == FILE_CORRUPT:
         # 寫入含 NUL 與亂碼的損毀檔，模擬傳輸中斷/磁碟壞軌
-        with open(path, "wb") as f:
+        with open(tmp, "wb") as f:
             f.write(",".join(header).encode() + b"\n")
             f.write(b"\x00\xffGARBAGE\x00" * 200)
-        return
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=header)
-        writer.writeheader()
-        writer.writerows(rows)
+    else:
+        with open(tmp, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(rows)
+    tmp.replace(path)
 
 
 def landing_path(pipeline: str, business_date: date) -> Path:
