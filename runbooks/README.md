@@ -11,6 +11,8 @@
 | `ETLBlockingCheckFailed`（encryption_format） | critical | [RB-02 暗碼欄位明碼洩漏](RB-02-encryption-leak.md) |
 | `ETLJobFailed` / 需重跑回補 | critical | [RB-03 重跑與回補 SOP](RB-03-backfill-sop.md) |
 | `ETLRowCountAnomaly` / `ETLNullRatioHigh` | warning | RB-01 的判斷流程 + 通知上游 |
+| `C2DLQNotEmpty` | critical | [RB-04 DLQ 訊息處置](RB-04-dlq-handling.md) |
+| `C2VectorBacklogCritical` | critical | 擴容 worker（`--scale case2-vector=N`）+ RB-04 的升級原則 |
 
 ## 值班約定
 
