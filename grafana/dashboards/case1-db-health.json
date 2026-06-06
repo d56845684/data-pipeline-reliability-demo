@@ -1,0 +1,224 @@
+{
+  "uid": "case1-db",
+  "title": "Case 1 — Database Health (PostgreSQL)",
+  "tags": ["dataops", "database", "postgres"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "DB 狀態",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "pg_up", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 0 },
+                "1": { "text": "UP", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Cache Hit Ratio（目標 > 99%）",
+      "gridPos": { "h": 5, "w": 5, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"warehouse\"}[5m]) / (rate(pg_stat_database_blks_hit{datname=\"warehouse\"}[5m]) + rate(pg_stat_database_blks_read{datname=\"warehouse\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "textMode": "value" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "連線數 / 上限",
+      "gridPos": { "h": 5, "w": 5, "x": 9, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(pg_stat_activity_count)", "legendFormat": "目前連線", "refId": "A" },
+        { "expr": "max(pg_settings_max_connections)", "legendFormat": "max_connections", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
+        "overrides": []
+      },
+      "options": { "colorMode": "none", "graphMode": "none", "textMode": "value_and_name" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Warehouse DB 大小",
+      "gridPos": { "h": 5, "w": 5, "x": 14, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "pg_database_size_bytes{datname=\"warehouse\"}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
+        "overrides": []
+      },
+      "options": { "colorMode": "none", "graphMode": "area", "textMode": "value" }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Deadlocks（5m）",
+      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "increase(pg_stat_database_deadlocks{datname=\"warehouse\"}[5m])", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "TPS（commit / rollback）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(pg_stat_database_xact_commit{datname=\"warehouse\"}[1m])", "legendFormat": "commit/s", "refId": "A" },
+        { "expr": "rate(pg_stat_database_xact_rollback{datname=\"warehouse\"}[1m])", "legendFormat": "rollback/s", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" },
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "rollback/s" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "寫入速率（tuples inserted / updated / deleted）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(pg_stat_database_tup_inserted{datname=\"warehouse\"}[1m])", "legendFormat": "inserted/s", "refId": "A" },
+        { "expr": "rate(pg_stat_database_tup_updated{datname=\"warehouse\"}[1m])", "legendFormat": "updated/s", "refId": "B" },
+        { "expr": "rate(pg_stat_database_tup_deleted{datname=\"warehouse\"}[1m])", "legendFormat": "deleted/s", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" },
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "連線數（by state）",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (state) (pg_stat_activity_count{datname=\"warehouse\"})", "legendFormat": "{{state}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never", "stacking": { "mode": "normal" } },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Cache Hit Ratio 趨勢",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"warehouse\"}[5m]) / (rate(pg_stat_database_blks_hit{datname=\"warehouse\"}[5m]) + rate(pg_stat_database_blks_read{datname=\"warehouse\"}[5m]))",
+          "legendFormat": "cache hit ratio",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "thresholdsStyle": { "mode": "dashed" } },
+          "unit": "percentunit",
+          "min": 0.8,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0.9 }] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Locks（by mode）",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (mode) (pg_locks_count{datname=\"warehouse\"}) > 0", "legendFormat": "{{mode}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ]
+}

@@ -15,3 +15,7 @@ scrape_configs:
     honor_labels: true            # 保留 push 時的 job/pipeline 標籤
     static_configs:
       - targets: ["pushgateway:9091"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]

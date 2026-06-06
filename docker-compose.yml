@@ -16,6 +16,15 @@ services:
       timeout: 3s
       retries: 20
 
+  # 生產資料庫監控（連線數、TPS、cache hit、deadlock…）
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: postgresql://etl:etl@postgres:5432/warehouse?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # ---------- 監控層 ----------
   pushgateway:
     image: prom/pushgateway:v1.10.0

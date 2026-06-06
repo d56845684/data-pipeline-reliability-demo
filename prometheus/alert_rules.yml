@@ -58,3 +58,42 @@ groups:
         annotations:
           summary: "管道停擺：{{ $labels.pipeline }}"
           description: "已超過 90 秒（約 6 個模擬日）沒有成功的 ETL 執行"
+
+  - name: case1-db-health
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 連線失敗"
+          description: "postgres-exporter 無法連上資料庫，所有 ETL 載入將停擺"
+
+      - alert: PGConnectionsHigh
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 連線數超過 80%"
+          description: "目前使用率 {{ $value | humanizePercentage }}，再增長將拒絕新連線（檢查 connection pool 設定/連線洩漏）"
+
+      - alert: PGCacheHitRatioLow
+        expr: >
+          rate(pg_stat_database_blks_hit{datname="warehouse"}[5m])
+          / (rate(pg_stat_database_blks_hit{datname="warehouse"}[5m])
+             + rate(pg_stat_database_blks_read{datname="warehouse"}[5m])) < 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL cache hit ratio 偏低"
+          description: "warehouse 庫 cache hit {{ $value | humanizePercentage }} < 90%，查詢大量落盤（檢查 shared_buffers 或異常查詢模式）"
+
+      - alert: PGDeadlocks
+        expr: increase(pg_stat_database_deadlocks{datname="warehouse"}[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 發生 deadlock"
+          description: "5 分鐘內偵測到 {{ $value }} 次 deadlock，檢查並行寫入交易的鎖順序"
