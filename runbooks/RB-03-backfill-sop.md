@@ -15,8 +15,9 @@
 ## 2. 執行
 
 ```bash
-# 單一管道單日重跑（ETL 服務也會自動偵測落地檔並補跑，手動僅用於指定重跑）
-docker compose exec etl python etl_job.py --pipeline <pipeline> --date <YYYY-MM-DD>
+# 優先走 Airflow：DAG 的 scan 會自動偵測未處理/待回補檔案；
+# 或在 UI 對失敗的 mapped task 按 Clear 重跑。手動單日重跑：
+docker compose exec airflow python /opt/case1/etl_job.py --pipeline <pipeline> --date <YYYY-MM-DD>
 ```
 
 - **大範圍回補（> 30 天）**：分批執行（每批 ≤ 7 天，批間隔開），避免與當日正常批次搶資源

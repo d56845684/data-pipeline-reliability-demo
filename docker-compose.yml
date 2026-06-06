@@ -10,6 +10,7 @@ services:
       - "15432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U etl -d warehouse"]
       interval: 3s
@@ -99,16 +100,29 @@ services:
     volumes:
       - landing:/data
 
-  # ---------- ETL：掃描落地區、品質檢核、載入、上報 ----------
-  etl:
-    build: ./case1
-    command: ["python", "etl_service.py"]
+  # ---------- 排程層：Airflow（DAG 工廠 + dynamic task mapping）----------
+  airflow:
+    image: apache/airflow:2.10.4
+    command: standalone
     environment:
-      ETL_SCAN_SECONDS: "3"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://etl:etl@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "10"
+      AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE: "false"
+      # demo 便利性：容器啟動時補裝框架層相依（production 應改 bake 進自有 image）
+      _PIP_ADDITIONAL_REQUIREMENTS: prometheus-client==0.21.1
+      # 框架層（/opt/case1）的設定
+      PYTHONPATH: /opt/case1
       PUSHGATEWAY_URL: pushgateway:9091
       PG_DSN: postgresql://etl:etl@postgres:5432/warehouse
       DATA_DIR: /data/landing
+    ports:
+      - "18080:8080"
     volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - ./case1:/opt/case1:ro
       - landing:/data
     depends_on:
       postgres:

@@ -9,26 +9,28 @@
 七種典型異常**，ETL 框架以兩級品質檢核攔截，指標經 Pushgateway 進 Prometheus，
 Grafana 視覺化 + Alertmanager 告警分級路由。
 
-producer 與 ETL 為**完全解耦的兩個常駐服務**（透過落地區檔案介面溝通，貼近真實批次架構）：
-producer 以固定節奏（15 秒 = 1 個營業日）持續落檔；ETL 每 3 秒掃描落地區，
-自動處理新檔、偵測缺檔、回補遲到檔案。
+producer 與 ETL **完全解耦**（透過落地區檔案介面溝通）：producer 以固定節奏
+（15 秒 = 1 個營業日）持續落檔；**Apache Airflow** 作為排程層，由 DAG 工廠為
+每條管道動態生成 DAG（每分鐘掃描），以 **dynamic task mapping** 讓每個檔案成為
+獨立可重試的 task——處理新檔、偵測缺檔、回補遲到檔案，blocking 檢核失敗的檔案
+在 Airflow UI 直接轉紅。
 
 ```
-┌────────────┐ atomic CSV ┌──────────────┐ quality checks ┌────────────┐
-│  producer  │ ─────────► │ ETL service  │ ─────────────► │ PostgreSQL │ (冪等 upsert)
-│ (固定節奏    │  落地區     │ (掃描/檢核/   │                │ (warehouse) │
-│  +錯誤注入)  │            │  缺檔偵測/回補)│                └────────────┘
-└────────────┘            └──────┬───────┘
-                                 │ push metrics
-                                 ▼
-                          ┌─────────────┐    ┌────────────┐    ┌─────────┐
-                          │ Pushgateway │ ─► │ Prometheus │ ─► │ Grafana │
-                          └─────────────┘    │ (告警規則)   │    └─────────┘
-                                             └─────┬──────┘
-                                                   ▼
-                                            ┌──────────────┐   ┌──────────────┐
-                                            │ Alertmanager │ ─►│ alert-logger │ (模擬 Slack/PagerDuty)
-                                            └──────────────┘   └──────────────┘
+┌────────────┐ atomic CSV ┌───────────────────┐ quality checks ┌────────────┐
+│  producer  │ ─────────► │ Airflow (排程層)    │ ─────────────► │ PostgreSQL │ (冪等 upsert)
+│ (固定節奏    │  落地區     │ DAG 工廠×8 條管道   │                │ (warehouse) │◄─ postgres-exporter
+│  +錯誤注入)  │            │ scan→process→缺檔  │                └────────────┘   (DB 健康監控)
+└────────────┘            └────────┬──────────┘
+                                   │ push metrics（框架層 etl_job → metrics）
+                                   ▼
+                            ┌─────────────┐    ┌────────────┐    ┌─────────┐
+                            │ Pushgateway │ ─► │ Prometheus │ ─► │ Grafana │
+                            └─────────────┘    │ (告警規則)   │    └─────────┘
+                                               └─────┬──────┘
+                                                     ▼
+                                              ┌──────────────┐   ┌──────────────┐
+                                              │ Alertmanager │ ─►│ alert-logger │ ─► LINE（critical only）
+                                              └──────────────┘   └──────────────┘
 ```
 
 ### 快速開始
@@ -45,14 +47,21 @@ docker compose up -d --build
 
 | 服務 | URL |
 |------|-----|
-| Grafana 儀表板 | http://localhost:3000/d/case1-etl |
+| Grafana — ETL 品質儀表板 | http://localhost:3000/d/case1-etl |
+| Grafana — DB 健康儀表板 | http://localhost:3000/d/case1-db |
+| Airflow UI | http://localhost:18080（帳號 `admin`，密碼見下方指令） |
 | Prometheus（Alerts 頁籤看告警） | http://localhost:19090/alerts |
 | Alertmanager | http://localhost:19093 |
 | Pushgateway（原始指標） | http://localhost:19091 |
 
 ```bash
+# Airflow standalone 的 admin 密碼
+docker compose exec airflow cat standalone_admin_password.txt
+```
+
+```bash
 docker compose logs -f producer       # 看上游落檔與錯誤注入
-docker compose logs -f etl            # 看每日 ETL 執行結果
+docker compose logs -f airflow        # 看排程與 ETL 執行（或直接開 Airflow UI）
 docker compose logs -f alert-logger   # 看告警流（模擬 Slack/PagerDuty 通知）
 ```
 
@@ -91,7 +100,7 @@ alert-logger 印出通知。
 
 ```bash
 docker compose exec producer python producer.py --pipeline claims --date 2026-03-01 --force-error duplicate_pk
-docker compose exec etl      python etl_job.py  --pipeline claims --date 2026-03-01
+docker compose exec airflow  python /opt/case1/etl_job.py --pipeline claims --date 2026-03-01
 ```
 
 ### 查倉儲與執行歷史（PostgreSQL）
@@ -106,6 +115,8 @@ docker compose exec postgres psql -U etl -d warehouse \
 
 | 真實場景中的設計 | demo 中的實作 |
 |------------------|--------------|
+| Airflow DAG 工廠（零侵入接入） | `airflow/dags/etl_quality_dags.py` 依 config 動態生成 8 條 DAG |
+| 排程層可靠性 | retry + backoff、max_active_runs、dynamic task mapping 單檔重試 |
 | 框架層 metrics 注入（零侵入） | `metrics.push_run_metrics()` 統一上報 |
 | Pushgateway 解短生命週期問題 | push 模式 + `honor_labels` |
 | 兩級品質檢核 | `quality_checks.py` blocking/warning |
@@ -176,7 +187,7 @@ docker compose exec producer python inject.py encryption_leak policies
 
 - producer：`PRODUCE_INTERVAL_SECONDS`（落檔節奏，演示可調 5 秒加快）、
   `ERROR_MULTIPLIER`（錯誤頻率倍數，0 = 全健康；2.0 = 高頻事故）、`SEED`（可重現）
-- etl：`ETL_SCAN_SECONDS`（落地區掃描頻率）
+- airflow：DAG `schedule=timedelta(minutes=1)`（`airflow/dags/etl_quality_dags.py`）
 
 ## Case 2 — 多租戶佇列檔案處理（規劃中）
 
