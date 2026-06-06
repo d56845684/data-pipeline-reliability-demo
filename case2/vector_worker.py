@@ -13,6 +13,7 @@
   單一租戶的積壓不會阻塞其他租戶
 - e2e 延遲（上傳→入庫）按租戶上報 histogram，供 P95 監控與告警
 """
+import hashlib
 import json
 import random
 import time
@@ -26,6 +27,8 @@ import embedding
 CHUNKS = Counter("c2_chunks_processed_total", "chunks embedded+stored", ["tenant"])
 DUPES = Counter("c2_duplicates_skipped_total", "idempotent skips", ["tenant"])
 POISON = Counter("c2_poison_dlq_total", "poison messages dead-lettered", ["tenant"])
+UNEXPECTED = Counter("c2_unexpected_failures_total",
+                     "unexpected processing failures dead-lettered", ["tenant", "kind"])
 E2E = Histogram("c2_chunk_e2e_seconds", "upload -> stored e2e latency", ["tenant"],
                 buckets=(1, 2, 5, 10, 20, 40, 60, 120, 240, 480, 900))
 EMBED_SECONDS = Histogram("c2_embed_seconds", "embedding inference duration per batch",
@@ -97,6 +100,16 @@ def _process_batch(ch, pg, batch) -> None:
 REQUIRED_FIELDS = ("file_id", "chunk_idx", "tenant", "upload_ts", "text")
 
 
+def _is_sticky_failure(file_id: str, chunk_idx: int) -> bool:
+    """特定輸入觸發的未知 bug：由內容 hash 決定 → 同一則訊息每次處理都失敗。
+
+    模擬「重放也救不回來」的殘餘案例（如某種邊界字元讓解析器崩潰），
+    哨兵重放額度耗盡後會留在 DLQ 等人工 debug。
+    """
+    digest = hashlib.md5(f"{file_id}#{chunk_idx}".encode()).digest()
+    return int.from_bytes(digest[:2], "big") / 65535.0 < config.STICKY_FAIL_PROB
+
+
 def make_handler(pg):
     def on_message(ch, method, _props, body):
         try:
@@ -113,6 +126,22 @@ def make_handler(pg):
             reason = "poison" if msg.get("poison") else f"missing fields {missing}"
             print(f"[vector] ☠️ {reason}: "
                   f"{msg.get('file_id', '?')}#{msg.get('chunk_idx', '?')} → DLQ", flush=True)
+            return
+
+        # 預期外的隨機失敗 —— 進 DLQ 交給哨兵分流
+        if _rng.random() < config.TRANSIENT_FAIL_PROB:
+            # 暫時性故障（embedding 服務 5xx / OOM）：重放即成功
+            UNEXPECTED.labels(msg["tenant"], "transient").inc()
+            ch.basic_nack(method.delivery_tag, requeue=False)
+            print(f"[vector] 💥 預期外暫時性失敗 {msg['file_id']}#{msg['chunk_idx']} "
+                  "→ DLQ（哨兵將自動重放）", flush=True)
+            return
+        if _is_sticky_failure(msg["file_id"], msg["chunk_idx"]):
+            # 特定輸入觸發的未知 bug：每次重放都會再失敗
+            UNEXPECTED.labels(msg["tenant"], "sticky").inc()
+            ch.basic_nack(method.delivery_tag, requeue=False)
+            print(f"[vector] 🐛 未知 bug（特定輸入觸發）{msg['file_id']}#{msg['chunk_idx']} "
+                  "→ DLQ（重放仍會失敗，額度耗盡後留人工）", flush=True)
             return
 
         _buffer.append((method.delivery_tag, msg))

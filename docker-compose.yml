@@ -187,6 +187,8 @@ services:
       EMBED_BASE_MS: "30"                     # 每次推論呼叫的固定 overhead
       EMBED_MS_PER_TOKEN: "0.05"
       EMBED_DIM: "384"
+      TRANSIENT_FAIL_PROB: "0.004"            # 預期外暫時性失敗（哨兵自動重放可救）
+      STICKY_FAIL_PROB: "0.0003"              # 特定輸入未知 bug（重放無效，留 DLQ 等人工）
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -31,6 +31,13 @@ ERROR_SCENARIOS = {
     "mini_burst": 0.01,   # 單一租戶突發上傳 10-25 份中大型檔案
 }
 
+# ---- 預期外處理失敗（vector worker 端，訊息進 DLQ）----
+# 暫時性故障（embedding 服務 5xx / worker OOM）：重放即成功 → 驗證哨兵 auto-replay
+TRANSIENT_FAIL_PROB = float(os.getenv("TRANSIENT_FAIL_PROB", "0.004"))
+# 黏性失敗（特定輸入觸發的未知 bug，由內容 hash 決定）：每次重放都失敗
+# → 耗盡哨兵重放額度後留在 DLQ 等人工 → 驗證 human-residual 路徑
+STICKY_FAIL_PROB = float(os.getenv("STICKY_FAIL_PROB", "0.0003"))
+
 # ---- 租戶 ----
 TENANTS = ["acme", "globex", "initech", "umbrella", "stark", "wayne", "hooli", "dunder"]
 BIG_TENANT = "megacorp"          # 事故主角：一次上傳上百份大檔的大客戶
