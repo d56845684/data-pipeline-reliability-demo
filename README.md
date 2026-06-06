@@ -112,6 +112,7 @@ docker compose exec postgres psql -U etl -d warehouse \
 | 動態基線（同期 ±3σ） | `db.get_same_daytype_history()` + z-score |
 | 告警分級路由 | Alertmanager critical 即時 / warning 聚合 |
 | 冪等回補 | `ON CONFLICT DO UPDATE` + late_arrival 自動補跑 |
+| 標準化應對流程 | [`runbooks/`](runbooks/)：告警對應的值班手冊 + postmortem 模板 |
 
 ### LINE 告警推播設定（選用）
 
