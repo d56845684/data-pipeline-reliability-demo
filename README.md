@@ -1,7 +1,7 @@
 # Data Pipeline Reliability — Demo
 
-兩個 production-grade 資料管道可靠性案例的**示意性重現**：批次 ETL 品質監控體系，
-與多租戶佇列檔案處理。
+三個 production-grade 資料管道可靠性案例的**示意性重現**：批次 ETL 品質監控體系、
+多租戶佇列檔案處理，以及事件驅動的即時決策管道。
 
 > ⚠️ 本 repo 為簡化的概念展示（demo），僅呈現核心設計思路與大致流程，
 > 並非任何原專案的實際程式碼或完整內容；所有資料均由模擬器產生。
@@ -300,3 +300,33 @@ BATCH_WRITES=false docker compose up -d case2-vector
 ```bash
 docker compose down -v   # 全部清掉重來
 ```
+
+## Case 3 — 事件驅動的即時決策管道（Kinesis + Redis + EventBridge Scheduler）
+
+> 📐 詳細架構圖與設計說明：[case3/README.md](case3/README.md)
+
+使用者事件進來後，在適當時機決定「提醒、給優惠、推薦內容，或什麼都不做」。
+重點是這類管道的可靠性設計：事件去重與冪等發送、延遲工作不遺失、即時層故障時降級、
+落地前去識別化、每筆決策可追溯。
+
+![Case 3 目標架構](case3/docs/target_architecture.png)
+
+Case 3 獨立於上面的 compose 堆疊，本機執行不需要 Docker 或任何雲端帳號：
+
+```bash
+cd case3
+pip install -r requirements.txt
+python3 -m pytest -q          # 34 個測試
+python3 demo_local.py         # 一個晚上的事件走完整張架構圖
+python3 simulate.py           # 模擬 30,000 位使用者、7 天
+```
+
+| 可靠性議題 | demo 實作 |
+|-----------|-----------|
+| 重複事件與重複消費 | Gateway 以 UUID 去重；消費者各自 checkpoint（at-least-once）；發送以 `decision_id` 冪等 |
+| 延遲工作 | 到期工作表；雲端版用 EventBridge Scheduler 一次性排程，經 SQS 喚醒 |
+| 即時層故障 | 退回近期層與靜態層，停用涉及金錢的動作，發送延後到能確認狀態 |
+| 個資保護 | Firehose 的 Lambda 在落地前去識別化（假名化、丟棄電話與 IP、聊天只留長度） |
+| 可追溯 | 每筆決策（含不行動）寫入 Context 快照、護欄結果、分數、規則版本 |
+
+選用：`case3/infra/` 的 Terraform 可以把無伺服器的部分建在真實的 AWS 上，步驟見 case3/README.md。

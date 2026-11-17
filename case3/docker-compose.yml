@@ -1,0 +1,52 @@
+# Local half of the target architecture. The serverless half is in infra/ (Terraform).
+#
+#   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...   # your own credentials
+#   docker compose up --build -d
+#   docker compose logs -f worker
+#   docker compose down -v
+
+x-service: &service
+  build: .
+  env_file:
+    - .env.aws          # written by terraform apply
+    - path: ../.env     # optional: OPENROUTER_API_KEY for the hosted judge model
+      required: false
+  environment:
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?export your AWS credentials first}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?export your AWS credentials first}
+    DATABASE_URL: postgresql://poc:poc@postgres:5432/engagement
+    REDIS_URL: redis://redis:6379/0
+    BUFFER_SECONDS: ${BUFFER_SECONDS:-90}       # the design value is 600; shortened for a demo
+    QUIET_START_HOUR: ${QUIET_START_HOUR:-24}   # the design's quiet hours are 23 to 8; off for a demo
+    QUIET_END_HOUR: ${QUIET_END_HOUR:-0}
+    JUDGE: ${JUDGE:-jev}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+
+services:
+  redis:              # realtime layer (ElastiCache in the target architecture)
+    image: redis:7-alpine
+
+  postgres:           # recent layer, triggers, decision log (RDS in the target architecture)
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: poc
+      POSTGRES_PASSWORD: poc
+      POSTGRES_DB: engagement
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poc -d engagement"]
+      interval: 2s
+      retries: 20
+
+  api:                # Event Gateway and the synchronous read path
+    <<: *service
+    command: uvicorn target_arch.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8088:8000"
+
+  worker:             # Context Builder, Trigger, Decision Service, Action Executor
+    <<: *service
+    command: python -m target_arch.worker
